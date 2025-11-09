@@ -5,33 +5,50 @@ mod midi_io;
 use data::{Bar, NoteEvent};
 use generator::MusicGenerator;
 use midi_io::MidiTransmitter;
+use std::time::Duration;
+use tokio::time::sleep;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let target_port_name = "Microsoft GS Wavetable Synth";
     let mut transmitter = MidiTransmitter::new(target_port_name)?;
 
-    let mut generator = MusicGenerator::new();
+    const CHANNEL_CAPACITY: usize = 10;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Bar>(CHANNEL_CAPACITY);
 
-    // 1分(60,000ms) / 120 = 500ms が四分音符の長さ
-    const QUARTER_NOTE_DURATION_MS: u64 = 500;
+    tokio::spawn(async move {
+        let mut generator = MusicGenerator::new();
+        loop {
+            let next_bar: Bar = generator.generate_next_bar();
 
-    let start_time = std::time::Instant::now();
-    let mut current_time_ms: u64 = 0;
+            if tx.send(next_bar).await.is_err() {
+                eprintln!("Generator: Receiver dropped. Exiting generator task.");
+                break;
+            }
+        }
+    });
+
+    const QUARTER_NOTE_DURATION_MS: u16 = 500;
+    let mut current_bar_start_time = std::time::Instant::now();
+
+    let mut current_bar = rx.recv().await.expect("Failed to receive first bar.");
 
     loop {
-        let next_bar: Bar = generator.generate_next_bar();
-        println!("Generated Chord is: {:?}", next_bar.chord); // どのコードが選ばれたか表示
+        let next_bar_future = rx.recv();
 
-        let bar_duration_ms = 4 * QUARTER_NOTE_DURATION_MS;
+        println!("Playing Chord: {:?}", current_bar.chord);
+        println!("currnt_bar is {:?}", current_bar);
 
-        for (event_time_offset, event) in next_bar.events.iter() {
-            let target_absolute_time_ms = current_time_ms + event_time_offset;
+        let bar_duration_ms: u16 = current_bar.beat * QUARTER_NOTE_DURATION_MS;
 
-            let elapsed_time = start_time.elapsed().as_millis() as u64;
+        for (event_time_offset, event) in current_bar.events.iter() {
+            let elapsed_in_bar_ms: u32 = current_bar_start_time.elapsed().as_millis() as u32;
+            let target_relative_time_ms: u32 = (*event_time_offset).into();
 
-            if target_absolute_time_ms > elapsed_time {
-                let wait_time_ms = target_absolute_time_ms - elapsed_time;
-                std::thread::sleep(std::time::Duration::from_millis(wait_time_ms));
+            if target_relative_time_ms > elapsed_in_bar_ms {
+                let wait_time_ms = target_relative_time_ms - elapsed_in_bar_ms;
+
+                sleep(Duration::from_millis(wait_time_ms.into())).await;
             }
 
             if let Some(message) = note_event_to_midi_message(*event)
@@ -41,13 +58,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        current_time_ms += bar_duration_ms;
+        // wait until the last for bar
+        let elapsed_in_bar_ms: u32 = current_bar_start_time.elapsed().as_millis() as u32;
+        let bar_duration_u32: u32 = bar_duration_ms.into();
 
-        let elapsed_time = start_time.elapsed().as_millis() as u64;
-        if current_time_ms > elapsed_time {
-            let wait_time_ms = current_time_ms - elapsed_time;
-            std::thread::sleep(std::time::Duration::from_millis(wait_time_ms));
+        if bar_duration_u32 > elapsed_in_bar_ms {
+            let wait_time_ms = bar_duration_u32 - elapsed_in_bar_ms;
+            sleep(Duration::from_millis(wait_time_ms.into())).await;
         }
+
+        current_bar_start_time = std::time::Instant::now();
+
+        current_bar = next_bar_future
+            .await
+            .expect("Generator task closed unexpectedly.");
     }
 }
 

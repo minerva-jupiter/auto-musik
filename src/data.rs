@@ -8,17 +8,10 @@ pub enum NoteEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bar {
-    pub beat: Beat,
+    pub beat: u16,
     pub tonality: Tonality,
     pub chord: Chord,
-    pub events: Vec<(u64, NoteEvent)>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Beat {
-    TwoFourth,
-    ThreeFourth,
-    FourFourth,
+    pub events: Vec<(u16, NoteEvent)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
