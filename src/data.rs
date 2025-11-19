@@ -17,6 +17,17 @@ pub struct Bar {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tonality {
     CM,
+    GM,
+    DM,
+    AM,
+    EM,
+    BM,
+    GFM,
+    DFM,
+    AFM,
+    EFM,
+    BFM,
+    FM,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
